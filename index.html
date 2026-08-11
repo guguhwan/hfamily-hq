@@ -98,7 +98,7 @@
   <h2 class="sr-only" style="position:absolute;width:1px;height:1px;overflow:hidden;clip:rect(0,0,0,0)">인연 매칭 상담 예약 페이지 — 평생 반려자를 찾는 1:1 프라이빗 매칭 서비스</h2>
 
   <div class="hero">
-    <div class="hero-badge">행복한 가정의 시작</div>
+    <div class="hero-badge">건강한 가정의 시작</div>
     <h1>당신의 평생을 함께할 사람,<br><em>여기서 만날 수 있습니다</em></h1>
     <div class="hero-divider"></div>
     <p>단순한 조건 매칭이 아닌<br>가치관과 심정을 깊이 나누는 만남</p>
@@ -327,6 +327,29 @@ function toggleConcern(btn) {
 
 const SCRIPT_URL = "https://script.google.com/macros/s/AKfycbwsF0i5BUZm_LZhJlG5rpcUadNc2RHOik_EcqDmG5ScaXBNVqvu1mO7FYtL4mecndHZ/exec";
 
+// 구글 폼 제출용 (공개 응답 URL)
+const GOOGLE_FORM_URL = "https://docs.google.com/forms/u/0/d/e/1FAIpQLSfKBHJUyxjnjFW0wIxjSaFcTbB5KE92niUl2SWKt2ZvrbfonQ/formResponse";
+const ENTRY = {
+  consent: "entry.525022227",   // 개인정보 동의 (자동 '동의' 처리)
+  name: "entry.1210185756",
+  phone: "entry.1088783972",
+  gender: "entry.1565340476",
+  age: "entry.293211912",
+  dateBase: "entry.1775296927", // _year, _month, _day
+  timeBase: "entry.132870055",  // _hour, _minute
+  concern: "entry.1480512085"   // 체크박스, '기타'로 매핑
+};
+
+function to24Hour(timeStr) {
+  // "오전 10:00" / "오후 3:00" -> { hour, minute } (24시간제)
+  const isPM = timeStr.includes('오후');
+  const [, hm] = timeStr.split(' ');
+  let [h, m] = hm.split(':').map(Number);
+  if (isPM && h !== 12) h += 12;
+  if (!isPM && h === 12) h = 0;
+  return { hour: h, minute: m };
+}
+
 function submitForm() {
   const name = document.getElementById('name').value.trim();
   const phone = document.getElementById('phone').value.trim();
@@ -352,18 +375,42 @@ function submitForm() {
     concerns: selectedConcerns.join(', ')
   };
 
-  fetch(SCRIPT_URL, {
+  // 1) 기존 구글시트 연동(Apps Script)
+  const sheetSubmit = fetch(SCRIPT_URL, {
     method: 'POST',
     mode: 'no-cors',
     headers: { 'Content-Type': 'text/plain;charset=utf-8' },
     body: JSON.stringify(payload)
-  })
+  }).catch(() => {});
+
+  // 2) 구글 폼 직접 제출
+  const [y, mo, d] = selectedDate.split('-');
+  const { hour, minute } = to24Hour(selectedTime);
+  const fd = new URLSearchParams();
+  fd.append(ENTRY.consent, '동의');
+  fd.append(ENTRY.name, name);
+  fd.append(ENTRY.phone, phone);
+  fd.append(ENTRY.gender, selectedGender);
+  fd.append(ENTRY.age, age);
+  fd.append(ENTRY.dateBase + '_year', y);
+  fd.append(ENTRY.dateBase + '_month', String(Number(mo)));
+  fd.append(ENTRY.dateBase + '_day', String(Number(d)));
+  fd.append(ENTRY.timeBase + '_hour', String(hour));
+  fd.append(ENTRY.timeBase + '_minute', String(minute));
+  fd.append(ENTRY.concern, '__other_option__');
+  fd.append(ENTRY.concern + '.other_option_response', selectedConcerns.join(', '));
+
+  const formSubmit = fetch(GOOGLE_FORM_URL, {
+    method: 'POST',
+    mode: 'no-cors',
+    headers: { 'Content-Type': 'application/x-www-form-urlencoded;charset=UTF-8' },
+    body: fd.toString()
+  }).catch(() => {});
+
+  Promise.allSettled([sheetSubmit, formSubmit])
     .then(() => {
       document.getElementById('summary-text').textContent = name + '님 · ' + selectedDate + ' ' + selectedTime;
       document.getElementById('success-overlay').style.display = 'flex';
-    })
-    .catch(() => {
-      alert('전송 중 오류가 발생했습니다. 잠시 후 다시 시도해 주세요.');
     })
     .finally(() => {
       btn.disabled = false;
